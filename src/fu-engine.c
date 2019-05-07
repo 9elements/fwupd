@@ -49,6 +49,7 @@ static void fu_engine_finalize	 (GObject *obj);
 struct _FuEngine
 {
 	GObject			 parent_instance;
+	GDBusConnection		*connection;
 	FuAppFlags		 app_flags;
 	GUsbContext		*usb_ctx;
 	GUdevClient		*gudev_client;
@@ -1479,6 +1480,39 @@ fu_engine_create_release_metadata (FuEngine *self, FuPlugin *plugin, GError **er
 	return g_steal_pointer (&release);
 }
 
+void
+fu_engine_set_connection (FuEngine *self, GDBusConnection *connection)
+{
+	g_return_if_fail (FU_IS_ENGINE (self));
+	g_return_if_fail (connection != NULL);
+	g_set_object (&self->connection, connection);
+}
+
+static gboolean
+fu_engine_is_running_offline (FuEngine *self)
+{
+	const gchar *default_target = NULL;
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GVariant) val = NULL;
+
+	if (self->connection == NULL)
+		return FALSE;
+	val = g_dbus_connection_call_sync (self->connection,
+					   "org.freedesktop.systemd1",
+					   "/org/freedesktop/systemd1",
+					   "org.freedesktop.systemd1.Manager",
+					   "GetDefaultTarget",
+					   NULL, NULL,
+					   G_DBUS_CALL_FLAGS_NONE,
+					   1500, NULL, &error);
+	if (val == NULL) {
+		g_warning ("failed to get default.target: %s", error->message);
+		return FALSE;
+	}
+	g_variant_get (val, "(&s)", &default_target);
+	return g_strcmp0 (default_target, "system-update.target") == 0;
+}
+
 /**
  * fu_engine_install:
  * @self: A #FuEngine
@@ -1597,8 +1631,8 @@ fu_engine_install (FuEngine *self,
 		g_prefix_error (error, "failed to get release version: ");
 		return FALSE;
 	}
-	if ((self->app_flags & FU_APP_FLAGS_IS_OFFLINE) == 0 &&
-	    (flags & FWUPD_INSTALL_FLAG_OFFLINE) > 0) {
+	if ((flags & FWUPD_INSTALL_FLAG_OFFLINE) > 0 &&
+	    !fu_engine_is_running_offline (self)) {
 		g_autoptr(FwupdRelease) release_tmp = NULL;
 		plugin = fu_plugin_list_find_by_name (self->plugin_list, "upower", NULL);
 		if (plugin != NULL) {
@@ -4676,6 +4710,8 @@ fu_engine_finalize (GObject *obj)
 {
 	FuEngine *self = FU_ENGINE (obj);
 
+	if (self->connection != NULL)
+		g_object_unref (self->connection);
 	if (self->usb_ctx != NULL)
 		g_object_unref (self->usb_ctx);
 	if (self->silo != NULL)

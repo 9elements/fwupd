@@ -37,6 +37,8 @@ typedef enum {
 } FuEngineLoadFlags;
 
 FuEngine	*fu_engine_new				(FuAppFlags	 app_flags);
+void		 fu_engine_set_connection		(FuEngine	*self,
+							 GDBusConnection *connection);
 void		 fu_engine_add_app_flag			(FuEngine	*self,
 							 FuAppFlags	 app_flags);
 void		 fu_engine_add_plugin_filter		(FuEngine	*self,
