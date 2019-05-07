@@ -1491,26 +1491,56 @@ fu_engine_set_connection (FuEngine *self, GDBusConnection *connection)
 static gboolean
 fu_engine_is_running_offline (FuEngine *self)
 {
-	const gchar *default_target = NULL;
+	const gchar *path = NULL;
+	const gchar *state = NULL;
+	const gchar *unit = "fwupd-offline-update.service";
 	g_autoptr(GError) error = NULL;
-	g_autoptr(GVariant) val = NULL;
+	g_autoptr(GVariant) val_path = NULL;
+	g_autoptr(GVariant) val_prop = NULL;
+	g_autoptr(GVariant) val_vstr = NULL;
+	const gchar *active_states[] = { "active", "activating", "deactivating", NULL };
 
 	if (self->connection == NULL)
 		return FALSE;
-	val = g_dbus_connection_call_sync (self->connection,
-					   "org.freedesktop.systemd1",
-					   "/org/freedesktop/systemd1",
-					   "org.freedesktop.systemd1.Manager",
-					   "GetDefaultTarget",
-					   NULL, NULL,
-					   G_DBUS_CALL_FLAGS_NONE,
-					   1500, NULL, &error);
-	if (val == NULL) {
-		g_warning ("failed to get default.target: %s", error->message);
+
+	/* get path of fwupd-offline-update.service */
+	val_path = g_dbus_connection_call_sync (self->connection,
+						"org.freedesktop.systemd1",
+						"/org/freedesktop/systemd1",
+						"org.freedesktop.systemd1.Manager",
+						"GetUnit",
+						g_variant_new ("(s)", unit),
+						NULL,
+						G_DBUS_CALL_FLAGS_NONE,
+						1500, NULL, &error);
+	if (val_path == NULL) {
+		g_warning ("failed to find %s: %s", unit, error->message);
 		return FALSE;
 	}
-	g_variant_get (val, "(&s)", &default_target);
-	return g_strcmp0 (default_target, "system-update.target") == 0;
+	g_variant_get (val_path, "(&o)", &path);
+
+	/* get state */
+	val_prop = g_dbus_connection_call_sync (self->connection,
+						"org.freedesktop.systemd1",
+						path,
+						"org.freedesktop.DBus.Properties",
+						"Get",
+						g_variant_new ("(ss)",
+							       "org.freedesktop.systemd1.Unit",
+							       "ActiveState"),
+						NULL,
+						G_DBUS_CALL_FLAGS_NONE,
+						1500, NULL, &error);
+	if (val_prop == NULL) {
+		g_warning ("failed to get ActiveState: %s", error->message);
+		return FALSE;
+	}
+	g_variant_get (val_prop, "(v)", &val_vstr);
+
+	/* check this is in any activating state */
+	state = g_variant_get_string (val_vstr, NULL);
+	g_debug ("%s has state '%s'", unit, state);
+	return g_strv_contains (active_states, state);
 }
 
 /**
