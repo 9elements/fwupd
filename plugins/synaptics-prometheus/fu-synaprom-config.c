@@ -74,8 +74,8 @@ fu_synaprom_config_setup (FuDevice *device, GError **error)
 	g_autoptr(GByteArray) request = NULL;
 
 	/* get IOTA */
-	cmd.itype = GUINT32_TO_LE(FU_SYNAPROM_IOTA_ITYPE_CONFIG_VERSION);
-	cmd.flags = GUINT32_TO_LE(FU_SYNAPROM_CMD_IOTA_FIND_FLAGS_READMAX);
+	cmd.itype = GUINT32_TO_LE((guint32)FU_SYNAPROM_IOTA_ITYPE_CONFIG_VERSION);
+	cmd.flags = GUINT32_TO_LE((guint32)FU_SYNAPROM_CMD_IOTA_FIND_FLAGS_READMAX);
 	request = fu_synaprom_request_new (FU_SYNAPROM_CMD_IOTA_FIND, &cmd, sizeof(cmd));
 	reply = fu_synaprom_reply_new (sizeof(FuSynapromReplyIotaFindHdr) + FU_SYNAPROM_MAX_IOTA_READ_SIZE);
 	if (!fu_synaprom_device_cmd_send (self->device, request, reply, 5000, error))
