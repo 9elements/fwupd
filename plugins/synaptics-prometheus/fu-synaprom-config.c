@@ -18,7 +18,6 @@ struct _FuSynapromConfig {
 	FuSynapromDevice	*device;
 	guint32			 configid1;		/* config ID1 */
 	guint32			 configid2;		/* config ID2 */
-	guint32			 config_version;	/* config version */
 };
 
 /* Iotas can exceed the size of available RAM in the part.
@@ -70,6 +69,7 @@ fu_synaprom_config_setup (FuDevice *device, GError **error)
 	FuSynapromCmdIotaFind cmd = { 0x0 };
 	FuSynapromIotaConfigVersion cfg;
 	FuSynapromReplyIotaFindHdr hdr;
+	g_autofree gchar *version = NULL;
 	g_autoptr(GByteArray) reply = NULL;
 	g_autoptr(GByteArray) request = NULL;
 
@@ -100,10 +100,14 @@ fu_synaprom_config_setup (FuDevice *device, GError **error)
 	memcpy (&cfg, reply->data + sizeof(hdr), sizeof(cfg));
 	self->configid1 = GUINT32_FROM_LE(cfg.config_id1);
 	self->configid2 = GUINT32_FROM_LE(cfg.config_id2);
-	self->config_version = GUINT16_FROM_LE(cfg.version);
 	g_debug ("id1=%u, id2=%u, ver=%u",
-		 self->configid1, self->configid2, self->config_version);
+		 self->configid1, self->configid2,
+		 GUINT16_FROM_LE(cfg.version));
 
+	/* no downgrades are allowed */
+	version = g_strdup_printf ("%04u", GUINT16_FROM_LE(cfg.version));
+	fu_device_set_version (FU_DEVICE (self), version, FWUPD_VERSION_FORMAT_PLAIN);
+	fu_device_set_version_lowest (FU_DEVICE (self), version);
 	return TRUE;
 }
 

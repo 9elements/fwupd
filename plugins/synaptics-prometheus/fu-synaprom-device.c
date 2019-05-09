@@ -16,7 +16,6 @@
 
 struct _FuSynapromDevice {
 	FuUsbDevice		 parent_instance;
-	FuSynapromConfig	*cfg;
 	guint8			 vmajor;
 	guint8			 vminor;
 };
@@ -141,15 +140,23 @@ void
 fu_synaprom_device_set_version (FuSynapromDevice *self,
 				guint8 vmajor, guint8 vminor, guint32 buildnum)
 {
-	g_autofree gchar *version = NULL;
+	g_autofree gchar *str = NULL;
 
 	/* set display version */
-	version = g_strdup_printf ("%02u.%02u.%u", vmajor, vminor, buildnum);
-	fu_device_set_version (FU_DEVICE (self), version, FWUPD_VERSION_FORMAT_TRIPLET);
+	str = g_strdup_printf ("%02u.%02u.%u", vmajor, vminor, buildnum);
+	fu_device_set_version (FU_DEVICE (self), str, FWUPD_VERSION_FORMAT_TRIPLET);
 
 	/* we need this for checking the firmware compatibility later */
 	self->vmajor = vmajor;
 	self->vminor = vminor;
+}
+
+static void
+fu_synaprom_device_set_serial_number (FuSynapromDevice *self, guint64 serial_number)
+{
+	g_autofree gchar *str = NULL;
+	str = g_strdup_printf ("%" G_GUINT64_FORMAT, serial_number);
+	fu_device_set_serial (FU_DEVICE (self), str);
 }
 
 static gboolean
@@ -157,10 +164,10 @@ fu_synaprom_device_setup (FuDevice *device, GError **error)
 {
 	FuSynapromDevice *self = FU_SYNAPROM_DEVICE (device);
 	FuSynapromReplyGetVersion pkt;
-	guint product;
+	guint32 product;
+	guint64 serial_number = 0;
 	g_autoptr(GByteArray) request = NULL;
 	g_autoptr(GByteArray) reply = NULL;
-	g_autoptr(GError) error_local = NULL;
 
 	/* get version */
 	request = fu_synaprom_request_new (FU_SYNAPROM_CMD_GET_VERSION, NULL, 0);
@@ -177,6 +184,10 @@ fu_synaprom_device_setup (FuDevice *device, GError **error)
 	fu_synaprom_device_set_version (self, pkt.vmajor, pkt.vminor,
 					GUINT32_FROM_LE(pkt.buildnum));
 
+	/* get serial number */
+	memcpy (&serial_number, pkt.serial_number, sizeof(pkt.serial_number));
+	fu_synaprom_device_set_serial_number (self, serial_number);
+
 	/* check device type */
 	if (product == FU_SYNAPROM_PRODUCT_PROMETHEUS) {
 		fu_device_remove_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER);
@@ -192,11 +203,14 @@ fu_synaprom_device_setup (FuDevice *device, GError **error)
 		return FALSE;
 	}
 
-	/* get config version */
-	if (!fu_device_setup (FU_DEVICE (self->cfg), &error_local)) {
-		g_warning ("failed to get config version: %s", error_local->message);
-	} else {
-		fu_device_add_child (FU_DEVICE (device), FU_DEVICE (self->cfg));
+	/* add updatable config child, if this is a production sensor */
+	if (pkt.security[1] & FU_SYNAPROM_SECURITY1_PROD_SENSOR) {
+		g_autoptr(FuSynapromConfig) cfg = fu_synaprom_config_new (self);
+		if (!fu_device_setup (FU_DEVICE (cfg), error)) {
+			g_prefix_error (error, "failed to get config version: ");
+			return FALSE;
+		}
+		fu_device_add_child (FU_DEVICE (device), FU_DEVICE (cfg));
 	}
 
 	/* success */
@@ -426,19 +440,10 @@ fu_synaprom_device_init (FuSynapromDevice *self)
 }
 
 static void
-fu_synaprom_device_finalize (GObject *obj)
-{
-	FuSynapromDevice *self = FU_SYNAPROM_DEVICE (obj);
-	g_object_unref (self->cfg);
-}
-
-static void
 fu_synaprom_device_class_init (FuSynapromDeviceClass *klass)
 {
 	FuDeviceClass *klass_device = FU_DEVICE_CLASS (klass);
 	FuUsbDeviceClass *klass_usb_device = FU_USB_DEVICE_CLASS (klass);
-	GObjectClass *object_class = G_OBJECT_CLASS (klass);
-	object_class->finalize = fu_synaprom_device_finalize;
 	klass_device->write_firmware = fu_synaprom_device_write_firmware;
 	klass_device->prepare_firmware = fu_synaprom_device_prepare_fw;
 	klass_device->setup = fu_synaprom_device_setup;
@@ -454,6 +459,5 @@ fu_synaprom_device_new (FuUsbDevice *device)
 	self = g_object_new (FU_TYPE_SYNAPROM_DEVICE, NULL);
 	if (device != NULL)
 		fu_device_incorporate (FU_DEVICE (self), FU_DEVICE (device));
-	self->cfg = fu_synaprom_config_new (self);
 	return FU_SYNAPROM_DEVICE (self);
 }
