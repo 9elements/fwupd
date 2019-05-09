@@ -72,19 +72,23 @@ fu_synaprom_firmware_new (GBytes *blob, GError **error)
 	/* parse each chunk */
 	while (offset != bufsz) {
 		FuSynapromFirmwareHdr header;
+		guint32 hdrsz;
 		g_autofree FuSynapromFirmwareItem *item = NULL;
 
 		/* verify item header */
 		memcpy (&header, buf, sizeof(header));
-		if (header.tag >= FU_SYNAPROM_FIRMWARE_TAG_MAX) {
+		item = g_new0 (FuSynapromFirmwareItem, 1);
+		item->tag = GUINT16_FROM_LE(header.tag);
+		if (item->tag >= FU_SYNAPROM_FIRMWARE_TAG_MAX) {
 			g_set_error (error,
 				     G_IO_ERROR,
 				     G_IO_ERROR_INVALID_DATA,
 				     "tag 0x%04x is too large",
-				     header.tag);
+				     item->tag);
 			return NULL;
 		}
-		offset += sizeof(header) + header.bufsz;
+		hdrsz = GUINT32_FROM_LE(header.bufsz);
+		offset += sizeof(header) + hdrsz;
 		if (offset > bufsz) {
 			g_set_error (error,
 				     G_IO_ERROR,
@@ -96,17 +100,15 @@ fu_synaprom_firmware_new (GBytes *blob, GError **error)
 
 		/* move pointer to data */
 		buf += sizeof(header);
-		item = g_new0 (FuSynapromFirmwareItem, 1);
-		item->tag = header.tag;
-		item->bytes = g_bytes_new (buf, header.bufsz);
+		item->bytes = g_bytes_new (buf, hdrsz);
 		g_debug ("adding 0x%04x (%s) with size 0x%04x",
 			 item->tag,
 			 fu_synaprom_firmware_tag_to_string (item->tag),
-			 header.bufsz);
+			 hdrsz);
 		g_ptr_array_add (firmware, g_steal_pointer (&item));
 
 		/* next item */
-		buf += header.bufsz;
+		buf += hdrsz;
 	}
 	return g_steal_pointer (&firmware);
 }
